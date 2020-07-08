@@ -889,7 +889,6 @@ Resources:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       DesiredCapacity: !Ref NumberOfNodes
-      LaunchConfigurationName: !Ref NodeLaunchConfig
       MinSize: !Ref NumberOfNodes
       MaxSize: !If [ MaxNodes, !Ref MaxNumberOfNodes, !Ref NumberOfNodes ]
       VPCZoneIdentifier: !If
@@ -913,6 +912,9 @@ Resources:
         - Key: !Sub 'k8s.io/cluster-autoscaler/${EKSControlPlane}'
           Value: ''
           PropagateAtLaunch: true
+      LaunchTemplate:
+        LaunchTemplateId: !Ref NodeLaunchTemplate
+        Version: !GetAtt NodeLaunchTemplate.LatestVersionNumber
     CreationPolicy:
       ResourceSignal:
         Count: !Ref NumberOfNodes
@@ -931,9 +933,9 @@ Resources:
       ServiceToken: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:EKS-QuickStart-KubeManifest-${EKSControlPlane}"
       HttpProxy: !Ref HttpProxy
       VpcId: !Ref VPCID
-  NodeLaunchConfig:
+  NodeLaunchTemplate:
     Condition: DisableManagedNodeGroup
-    Type: AWS::AutoScaling::LaunchConfiguration
+    Type: AWS::EC2::LaunchTemplate
     Metadata:
       AWS::CloudFormation::Authentication:
         S3Auth:
@@ -1030,109 +1032,114 @@ Resources:
             b-bootstrap:
               command: !Sub /etc/eks/bootstrap.sh ${EKSControlPlane} ${BootstrapArguments}
     Properties:
-      AssociatePublicIpAddress: false
-      IamInstanceProfile: !Ref NodeInstanceProfile
-      ImageId: !If
-        - UseCustomAmi
-        - !Ref CustomAmiId
-        - !FindInMap
-          - AWSAMIRegionMap
-          - !Ref "AWS::Region"
+      LaunchTemplateData:
+        IamInstanceProfile: 
+          Name: !Ref NodeInstanceProfile
+        ImageId: !If
+          - UseCustomAmi
+          - !Ref CustomAmiId
           - !FindInMap
-            - OStoK8sVersionMap
-            - !Ref NodeAMIOS
+            - AWSAMIRegionMap
+            - !Ref "AWS::Region"
             - !FindInMap
-              - K8sVersionMap
-              - !Ref KubernetesVersion
+              - OStoK8sVersionMap
+              - !Ref NodeAMIOS
               - !FindInMap
-                - InstanceTypes
-                - !Ref NodeInstanceType
-                - Type
-      InstanceType: !Ref NodeInstanceType
-      KeyName: !Ref KeyPairName
-      SecurityGroups:
-        - !Ref NodeSecurityGroup
-      BlockDeviceMappings:
-        - DeviceName: !If [ SuseOS, /dev/sda1, /dev/xvda ]
-          Ebs:
-            VolumeSize: !Ref NodeVolumeSize
-            VolumeType: gp2
-            DeleteOnTermination: true
-      UserData:
-        Fn::Base64:
-          !Sub
-          - |
-            #!/bin/bash
-            set -o xtrace
-            function signal() {
-              $1/cfn-signal --exit-code $2 \
-                --stack  ${AWS::StackName} \
-                --resource NodeGroup  \
-                --region ${AWS::Region}
-            }
-            ${ProxySetup}
-            ${BootStrap}
-            ${ProxyPostSetup}
-            ${Signal}
-          - ProxySetup: !If
-              - EnableProxy
-              - !Sub |
-                  MAC=$(curl -s http://169.254.169.254/latest/meta-data/mac/)
-                  VPCCIDR=$(curl -s http://169.254.169.254/latest/meta-data/network/interfaces/macs/$MAC/vpc-ipv4-cidr-blocks | xargs | tr ' ' ',')
-                  cat <<EOF >> /etc/environment
-                  HTTP_PROXY=${HttpProxy}
-                  HTTPS_PROXY=${HttpProxy}
-                  http_proxy=${HttpProxy}
-                  https_proxy=${HttpProxy}
-                  no_proxy=$VPCCIDR,localhost,127.0.0.1,169.254.169.254,.internal
-                  NO_PROXY=$VPCCIDR,localhost,127.0.0.1,169.254.169.254,.internal
-                  EOF
-                  set -a
-                  source /etc/environment
-              - ""
-            ProxyPostSetup: !If
-              - EnableProxy
-              - |
-                  mkdir -p /etc/systemd/system/docker.service.d
-                  cat <<EOF >> /etc/systemd/system/docker.service.d/proxy.conf
-                  [Service]
-                  EnvironmentFile=/etc/environment
-                  EOF
-                  cat <<EOF >> /etc/systemd/system/kubelet.service.d/proxy.conf
-                  [Service]
-                  EnvironmentFile=/etc/environment
-                  EOF
-                  systemctl daemon-reload
-                  systemctl enable --now --no-block docker
-                  systemctl restart docker
-                  systemctl restart kubelet
-              - ""
-            Signal: !If
-              - AmznOS
-              - |
-                  signal /opt/aws/bin $?
-              - |
-                  signal /usr/bin $?
-                  if [ -e /etc/os-release ] && grep SLES /etc/os-release; then
-                    # Need to enable some kernel boot options and reboot
-                    sed -i 's|GRUB_CMDLINE_LINUX=""|GRUB_CMDLINE_LINUX="cgroup_enable=memory swapaccount=1" |' /etc/default/grub
-                    grub2-mkconfig -o /boot/grub2/grub.cfg
-                    reboot
-                  fi
-            BootStrap: !If
-            - AmznOS
-            - !Sub |
-                /etc/eks/bootstrap.sh ${EKSControlPlane} ${BootstrapArguments} || signal /opt/aws/bin $1
-            - !Sub |
-                if [ -e /etc/os-release ] && grep SLES /etc/os-release; then
-                  zypper in -y python2-setuptools
-                  update-alternatives --set easy_install /usr/bin/easy_install-2.7
-                fi
-                easy_install https://cloudformation-examples.s3.amazonaws.com/aws-cfn-bootstrap-latest.zip
-                /usr/bin/cfn-init \
-                  --stack ${AWS::StackName} \
-                  --resource NodeLaunchConfig \
+                - K8sVersionMap
+                - !Ref KubernetesVersion
+                - !FindInMap
+                  - InstanceTypes
+                  - !Ref NodeInstanceType
+                  - Type
+        InstanceType: !Ref NodeInstanceType
+        KeyName: !Ref KeyPairName
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: false
+            Description: String
+            Groups:
+              - !Ref NodeSecurityGroup
+        BlockDeviceMappings:
+          - DeviceName: !If [ SuseOS, /dev/sda1, /dev/xvda ]
+            Ebs:
+              VolumeSize: !Ref NodeVolumeSize
+              VolumeType: gp2
+              DeleteOnTermination: true
+        UserData:
+          Fn::Base64:
+            !Sub
+            - |
+              #!/bin/bash
+              set -o xtrace
+              function signal() {
+                $1/cfn-signal --exit-code $2 \
+                  --stack  ${AWS::StackName} \
+                  --resource NodeGroup  \
                   --region ${AWS::Region}
+              }
+              ${ProxySetup}
+              ${BootStrap}
+              ${ProxyPostSetup}
+              ${Signal}
+            - ProxySetup: !If
+                - EnableProxy
+                - !Sub |
+                    MAC=$(curl -s http://169.254.169.254/latest/meta-data/mac/)
+                    VPCCIDR=$(curl -s http://169.254.169.254/latest/meta-data/network/interfaces/macs/$MAC/vpc-ipv4-cidr-blocks | xargs | tr ' ' ',')
+                    cat <<EOF >> /etc/environment
+                    HTTP_PROXY=${HttpProxy}
+                    HTTPS_PROXY=${HttpProxy}
+                    http_proxy=${HttpProxy}
+                    https_proxy=${HttpProxy}
+                    no_proxy=$VPCCIDR,localhost,127.0.0.1,169.254.169.254,.internal
+                    NO_PROXY=$VPCCIDR,localhost,127.0.0.1,169.254.169.254,.internal
+                    EOF
+                    set -a
+                    source /etc/environment
+                - ""
+              ProxyPostSetup: !If
+                - EnableProxy
+                - |
+                    mkdir -p /etc/systemd/system/docker.service.d
+                    cat <<EOF >> /etc/systemd/system/docker.service.d/proxy.conf
+                    [Service]
+                    EnvironmentFile=/etc/environment
+                    EOF
+                    cat <<EOF >> /etc/systemd/system/kubelet.service.d/proxy.conf
+                    [Service]
+                    EnvironmentFile=/etc/environment
+                    EOF
+                    systemctl daemon-reload
+                    systemctl enable --now --no-block docker
+                    systemctl restart docker
+                    systemctl restart kubelet
+                - ""
+              Signal: !If
+                - AmznOS
+                - |
+                    signal /opt/aws/bin $?
+                - |
+                    signal /usr/bin $?
+                    if [ -e /etc/os-release ] && grep SLES /etc/os-release; then
+                      # Need to enable some kernel boot options and reboot
+                      sed -i 's|GRUB_CMDLINE_LINUX=""|GRUB_CMDLINE_LINUX="cgroup_enable=memory swapaccount=1" |' /etc/default/grub
+                      grub2-mkconfig -o /boot/grub2/grub.cfg
+                      reboot
+                    fi
+              BootStrap: !If
+              - AmznOS
+              - !Sub |
+                  /etc/eks/bootstrap.sh ${EKSControlPlane} ${BootstrapArguments} || signal /opt/aws/bin $1
+              - !Sub |
+                  if [ -e /etc/os-release ] && grep SLES /etc/os-release; then
+                    zypper in -y python2-setuptools
+                    update-alternatives --set easy_install /usr/bin/easy_install-2.7
+                  fi
+                  easy_install https://cloudformation-examples.s3.amazonaws.com/aws-cfn-bootstrap-latest.zip
+                  /usr/bin/cfn-init \
+                    --stack ${AWS::StackName} \
+                    --resource NodeLaunchTemplate \
+                    --region ${AWS::Region}
   EKSNodegroup:
     Type: 'AWS::EKS::Nodegroup'
     Metadata:
