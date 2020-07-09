@@ -421,7 +421,7 @@ Resources:
         PrivateSubnet2ID: !If [2AZDeployment, !Ref PrivateSubnet2ID, !Ref "AWS::NoValue" ]
         PrivateSubnet3ID: !If [3AZDeployment, !Ref PrivateSubnet3ID, !Ref "AWS::NoValue" ]
         VPCID: !Ref VPCID
-        NodeInstanceType: !Ref NodeInstanceType
+        SpotNodeInstanceType1: !Ref NodeInstanceType
         NumberOfNodes: !Ref NumberOfNodes
         MaxNumberOfNodes: !Ref MaxNumberOfNodes
         NodeGroupName: !Ref NodeGroupName

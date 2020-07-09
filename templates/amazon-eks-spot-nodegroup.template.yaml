@@ -25,7 +25,10 @@ Metadata:
           default: EKS configuration
         Parameters:
           - EKSControlPlane
-          - NodeInstanceType
+          - SpotNodeInstanceType1
+          - SpotNodeInstanceType2
+          - SpotNodeInstanceType3
+          - SpotNodeInstanceType4
           - NumberOfNodes
           - MaxNumberOfNodes
           - NodeGroupName
@@ -56,8 +59,14 @@ Metadata:
         default: VPC ID
       EKSControlPlane:
         default: EKS cluster name
-      NodeInstanceType:
-        default: Nodes instance type
+      SpotNodeInstanceType1:
+        default: Spot node instance type 1
+      SpotNodeInstanceType2:
+        default: Spot node instance type 2
+      SpotNodeInstanceType3:
+        default: Spot node instance type 3
+      SpotNodeInstanceType4:
+        default: Spot node instance type 4
       NumberOfNodes:
         default: Number of nodes
       MaxNumberOfNodes:
@@ -175,7 +184,7 @@ Parameters:
   VPCID:
     Description: ID of your existing VPC for deployment
     Type: AWS::EC2::VPC::Id
-  NodeInstanceType:
+  SpotNodeInstanceType1:
     Default: t3.medium
     AllowedValues:
       - t3.nano
@@ -252,7 +261,22 @@ Parameters:
       - z1d.6xlarge
       - z1d.12xlarge
     ConstraintDescription: Must be a valid EC2 instance type
-    Description: Type of EC2 instance for the node instances
+    Description: Type of EC2 instance for the Spot Node group (1 of 4)
+    Type: String
+  SpotNodeInstanceType2:
+    Default: ""
+    ConstraintDescription: Must be a valid EC2 instance type
+    Description: Type of EC2 instance for the Spot Node group (2 of 4)
+    Type: String
+  SpotNodeInstanceType3:
+    Default: ""
+    ConstraintDescription: Must be a valid EC2 instance type
+    Description: Type of EC2 instance for the Spot Node group (3 of 4)
+    Type: String
+  SpotNodeInstanceType4:
+    Default: ""
+    ConstraintDescription: Must be a valid EC2 instance type
+    Description: Type of EC2 instance for the Spot Node group (4 of 4)
     Type: String
   NumberOfNodes:
     Default: 3
@@ -337,6 +361,14 @@ Conditions:
     - !Not [!Equals [!Ref PrivateSubnet2ID, ""]]
     - !Not [!Equals [!Ref PrivateSubnet3ID, ""]]
   MaxNodes: !Not [ !Equals [ !Ref MaxNumberOfNodes, "" ] ]
+  4InstanceTypes: !Not [!Equals [!Ref SpotNodeInstanceType4, ""]]
+  3InstanceTypes: !Or
+    - !Not [!Equals [!Ref SpotNodeInstanceType3, ""]]
+    - !Not [!Equals [!Ref SpotNodeInstanceType4, ""]]
+  2InstanceTypes: !Or
+    - !Not [!Equals [!Ref SpotNodeInstanceType2, ""]]
+    - !Not [!Equals [!Ref SpotNodeInstanceType3, ""]]
+    - !Not [!Equals [!Ref SpotNodeInstanceType4, ""]]
   AmznOS: !Equals
     - !Ref NodeAMIOS
     - Amazon-Linux-HVM
@@ -755,7 +787,7 @@ Mappings:
 Resources:
   SpotNodeGroup:
     Metadata:
-      DependsOn2: !If [ EnableProxy, !Ref ConfigureProxy, !Ref "AWS::NoValue" ]
+      DependsOn: !If [ EnableProxy, !Ref ConfigureProxy, !Ref "AWS::NoValue" ]
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       DesiredCapacity: !Ref NumberOfNodes
@@ -782,9 +814,30 @@ Resources:
         - Key: !Sub 'k8s.io/cluster-autoscaler/${EKSControlPlane}'
           Value: ''
           PropagateAtLaunch: true
-      LaunchTemplate:
-        LaunchTemplateId: !Ref NodeLaunchTemplate
-        Version: !GetAtt NodeLaunchTemplate.LatestVersionNumber
+      MixedInstancesPolicy:
+        LaunchTemplate:
+          LaunchTemplateSpecification:
+            LaunchTemplateId: !Ref SpotNodeLaunchTemplate
+            Version: !GetAtt SpotNodeLaunchTemplate.LatestVersionNumber
+          Overrides: !If
+            - 4InstanceTypes
+            - - InstanceType: !Ref SpotNodeInstanceType1
+              - InstanceType: !Ref SpotNodeInstanceType2
+              - InstanceType: !Ref SpotNodeInstanceType3
+              - InstanceType: !Ref SpotNodeInstanceType4
+            - !If
+              - 3InstanceTypes
+              - - InstanceType: !Ref SpotNodeInstanceType1
+                - InstanceType: !Ref SpotNodeInstanceType2
+                - InstanceType: !Ref SpotNodeInstanceType3
+              - !If
+                - 2InstanceTypes
+                - - InstanceType: !Ref SpotNodeInstanceType1
+                  - InstanceType: !Ref SpotNodeInstanceType2
+                - - InstanceType: !Ref SpotNodeInstanceType1
+        InstancesDistribution:
+          OnDemandPercentageAboveBaseCapacity: 0
+          SpotInstancePools: 4
     CreationPolicy:
       ResourceSignal:
         Count: !Ref NumberOfNodes
@@ -918,9 +971,9 @@ Resources:
                 - !Ref KubernetesVersion
                 - !FindInMap
                   - InstanceTypes
-                  - !Ref NodeInstanceType
+                  - !Ref SpotNodeInstanceType1
                   - Type
-        InstanceType: !Ref NodeInstanceType
+        InstanceType: !Ref SpotNodeInstanceType1
         KeyName: !Ref KeyPairName
         NetworkInterfaces:
           - DeviceIndex: 0
@@ -943,7 +996,7 @@ Resources:
               function signal() {
                 $1/cfn-signal --exit-code $2 \
                   --stack  ${AWS::StackName} \
-                  --resource NodeGroup  \
+                  --resource SpotNodeGroup  \
                   --region ${AWS::Region}
               }
               ${ProxySetup}
@@ -1012,4 +1065,4 @@ Resources:
 
 Outputs:
   NodeAutoScalingGroup:
-    Value: !Ref 'NodeGroup'
+    Value: !Ref 'SpotNodeGroup'
