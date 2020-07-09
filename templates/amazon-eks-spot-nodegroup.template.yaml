@@ -30,9 +30,7 @@ Metadata:
           - MaxNumberOfNodes
           - NodeGroupName
           - NodeVolumeSize
-          - ManagedNodeGroup
-          - ManagedNodeGroupAMIType
-          - ControlPlaneSecurityGroup
+          - NodeSecurityGroup
           - KubernetesVersion
           - TargetGroupARNs
       - Label:
@@ -41,8 +39,6 @@ Metadata:
           - QSS3BucketName
           - QSS3KeyPrefix
           - QSS3BucketRegion
-          - CleanupSecurityGroupDependenciesLambdaArn
-          - NodeSGFunctionArn
     ParameterLabels:
       QSS3BucketRegion:
         default: Quick Start S3 bucket region
@@ -70,20 +66,14 @@ Metadata:
         default: Node group name
       NodeVolumeSize:
         default: Node volume size
-      ManagedNodeGroup:
-        default: Managed Node Group
-      ManagedNodeGroupAMIType:
-        default: Managed Node Group AMI type
+      NodeSecurityGroup:
+        default: Security group for autoscaling group
       QSS3BucketName:
         default: Quick Start S3 bucket name
       QSS3KeyPrefix:
         default: Quick Start S3 key prefix
-      CleanupSecurityGroupDependenciesLambdaArn:
-        default: Cleanup Security Group dependencies Lambda ARN
       BootstrapArguments:
         default: Bootstrap arguments
-      ControlPlaneSecurityGroup:
-        default: Control plane Security Group
       NodeInstanceProfile:
         default: Node instance profile
       NodeInstanceRoleName:
@@ -98,8 +88,6 @@ Metadata:
         default: HTTP proxy
       TargetGroupARNs:
         default: Target Group ARN's
-      NodeSGFunctionArn:
-        default: Node security group Lambda ARN
   AWSAMIRegionMap:
     Filters:
       AMZNEKS116:
@@ -187,10 +175,6 @@ Parameters:
   VPCID:
     Description: ID of your existing VPC for deployment
     Type: AWS::EC2::VPC::Id
-  CleanupSecurityGroupDependenciesLambdaArn:
-    Description: ARN for CleanupSecurityGroupDependencies lambda function
-    Type: String
-    Default: ""
   NodeInstanceType:
     Default: t3.medium
     AllowedValues:
@@ -286,22 +270,9 @@ Parameters:
     Default: 20
     Description: Size for node volumes
     Type: String
-  ManagedNodeGroup:
-    AllowedValues: [ "yes", "no" ]
-    Default: "no"
-    Description: Choose if you want to use a managed node group. If you select "yes", you must select Kubernetes version 1.14 or higher.
-    Type: String
-  ManagedNodeGroupAMIType:
-    Description: Select one of the two AMI types for your Managed Node Group (only applies if you selected Managed Node Group "yes". ).
-      GPU instance types should use the AL2_x86_64_GPU AMI type, which uses the Amazon EKS-optimized Linux AMI with GPU support.
-      Non-GPU instances should use the AL2_x86_64 AMI type, which uses the Amazon EKS-optimized Linux AMI.
-    AllowedValues: [ "AL2_x86_64", " AL2_x86_64_GPU"]
-    Default: "AL2_x86_64"
-    Type: String
-  MangedNodeGroupLabel:
-    Description: Add a custom name label to the Managed Node Group Nodes. If you dont do this then a default one will be added for you.
-    Type: String
-    Default: ''
+  NodeSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group for autoscaling group
   EKSControlPlane:
     Description: Name of the EKS cluster to join
     Type: String
@@ -309,9 +280,6 @@ Parameters:
     Description: Arguments to pass to the bootstrap script. See files/bootstrap.sh in https://github.com/awslabs/amazon-eks-ami.
     Type: String
     Default: ""
-  ControlPlaneSecurityGroup:
-    Type: AWS::EC2::SecurityGroup::Id
-    Description: EKS control plane EC2 Security Group
   NodeInstanceProfile:
     Type: String
     Description: ARN for IAM Instance Profile to attach to nodes
@@ -362,9 +330,6 @@ Parameters:
     Type: String
     Default: ""
     Description: "[OPTIONAL] Specify the host name for an HTTP proxy to use for outbound internet access."
-  NodeSGFunctionArn:
-    Type: String
-    Description: Function ARN to fetch node Security Group for managed node groups
 Conditions:
   EnableProxy: !Not [!Equals [!Ref HttpProxy, ""]]
   3AZDeployment: !Not [!Equals [!Ref PrivateSubnet3ID, ""]]
@@ -385,17 +350,11 @@ Conditions:
     - !Ref NumberOfNodes
     - 1
   UseCustomAmi: !Not [ !Equals [ !Ref CustomAmiId, "" ] ]
-  CleanupSGs: !Or
-    - !Not [ !Equals [ !Ref CleanupSecurityGroupDependenciesLambdaArn, "" ] ]
-    - !Equals [ !Ref 'ManagedNodeGroup', 'no' ]
-  DisableManagedNodeGroup: !Equals [ !Ref 'ManagedNodeGroup' , 'no' ]
-  EnableManagedNodeGroup: !Equals [ !Ref 'ManagedNodeGroup', 'yes' ]
   UsingDefaultBucket: !Equals [!Ref QSS3BucketName, 'aws-quickstart']
   GreaterThan114: !Not
     - !Or
       - !Equals [ !Ref 'KubernetesVersion', '1.14' ]
       - !Equals [ !Ref 'KubernetesVersion', '1.13' ]
-  MNGLBL: !Equals [ !Ref 'MangedNodeGroupLabel', '' ]
 Mappings:
   K8sVersionMap:
     "1.13":
@@ -794,89 +753,9 @@ Mappings:
       SLES15EKS113: ami-0e8c0a5deaf823a88
       SLES15EKS113GPU: ami-0e8c0a5deaf823a88
 Resources:
-  CleanupSecurityGroupDependencies:
-    Condition: CleanupSGs
-    Type: Custom::Cleanup
-    Properties:
-      ServiceToken: !Ref CleanupSecurityGroupDependenciesLambdaArn
-      SecurityGroups:
-        - !If
-          - DisableManagedNodeGroup
-          - !Ref NodeSecurityGroup
-          - !Ref 'AWS::NoValue'
-  NodeSecurityGroup:
-    Condition: DisableManagedNodeGroup
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for all nodes in the node group
-      VpcId: !Ref VPCID
-      Tags:
-        - Key: !Sub "kubernetes.io/cluster/${EKSControlPlane}"
-          Value: 'owned'
-  NodeSecurityGroupIngress:
-    Condition: DisableManagedNodeGroup
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      Description: Allow nodes to communicate with each other
-      GroupId: !Ref NodeSecurityGroup
-      SourceSecurityGroupId: !Ref NodeSecurityGroup
-      IpProtocol: '-1'
-      FromPort: 0
-      ToPort: 65535
-  ManagedNodeSecurityGroupIngress:
+  SpotNodeGroup:
     Metadata:
-      cfn-lint: { config: { ignore_checks: [E3008] } }
-    Condition: EnableManagedNodeGroup
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      Description: Allow nodes to communicate with each other
-      GroupId: !Ref NodeSG
-      SourceSecurityGroupId: !Ref NodeSG
-      IpProtocol: '-1'
-      FromPort: 0
-      ToPort: 65535
-  NodeSecurityGroupFromControlPlaneIngress:
-    Condition: DisableManagedNodeGroup
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      Description: Allow worker Kubelets and pods to receive communication from the cluster control plane
-      GroupId: !Ref NodeSecurityGroup
-      SourceSecurityGroupId: !Ref ControlPlaneSecurityGroup
-      IpProtocol: tcp
-      FromPort: 1025
-      ToPort: 65535
-  NodeSecurityGroupFromControlPlaneOn443Ingress:
-    Condition: DisableManagedNodeGroup
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      Description: Allow pods running extension API servers on port 443 to receive communication from cluster control plane
-      GroupId: !Ref NodeSecurityGroup
-      SourceSecurityGroupId: !Ref ControlPlaneSecurityGroup
-      IpProtocol: tcp
-      FromPort: 443
-      ToPort: 443
-  ClusterControlPlaneSecurityGroupIngress:
-    Condition: DisableManagedNodeGroup
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      Description: Allow pods to communicate with the cluster API Server
-      GroupId: !Ref ControlPlaneSecurityGroup
-      SourceSecurityGroupId: !Ref NodeSecurityGroup
-      IpProtocol: tcp
-      ToPort: 443
-      FromPort: 443
-  NodeSG:
-    Condition: EnableManagedNodeGroup
-    Type: Custom::NodeSG
-    Properties:
-      ServiceToken: !Ref NodeSGFunctionArn
-      ClusterName: !Ref EKSControlPlane
-      NodeGroupName: !GetAtt EKSNodegroup.NodegroupName
-  NodeGroup:
-    Metadata:
-      DependsOn: !If [ CleanupSGs, !Ref CleanupSecurityGroupDependencies, !Ref "AWS::NoValue" ]
       DependsOn2: !If [ EnableProxy, !Ref ConfigureProxy, !Ref "AWS::NoValue" ]
-    Condition: DisableManagedNodeGroup
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       DesiredCapacity: !Ref NumberOfNodes
@@ -924,8 +803,7 @@ Resources:
       ServiceToken: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:EKS-QuickStart-KubeManifest-${EKSControlPlane}"
       HttpProxy: !Ref HttpProxy
       VpcId: !Ref VPCID
-  NodeLaunchTemplate:
-    Condition: DisableManagedNodeGroup
+  SpotNodeLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Metadata:
       AWS::CloudFormation::Authentication:
@@ -1131,43 +1009,7 @@ Resources:
                     --stack ${AWS::StackName} \
                     --resource NodeLaunchTemplate \
                     --region ${AWS::Region}
-  EKSNodegroup:
-    Type: 'AWS::EKS::Nodegroup'
-    Metadata:
-      DependsOn: !If [ CleanupSGs, !Ref CleanupSecurityGroupDependencies, !Ref "AWS::NoValue" ]
-    Condition: EnableManagedNodeGroup
-    Properties:
-      ClusterName: !Ref EKSControlPlane
-      NodeRole: !Ref NodeInstanceRoleArn
-      AmiType: !If [ EnableManagedNodeGroup, !Ref 'ManagedNodeGroupAMIType', !Ref "AWS::NoValue" ]
-      InstanceTypes:
-        - !Ref 'NodeInstanceType'
-      DiskSize: !Ref NodeVolumeSize
-      ScalingConfig:
-        MinSize: !Ref NumberOfNodes
-        DesiredSize: !Ref NumberOfNodes
-        MaxSize: !If [ MaxNodes, !Ref MaxNumberOfNodes, !Ref NumberOfNodes ]
-      Labels:
-        Key: Name
-        Value: !If [ MNGLBL, !Sub '${EKSControlPlane}-${NodeGroupName}-Node', !Ref MangedNodeGroupLabel ]
-        PropagateAtLaunch: true
-      Subnets: !If
-      - 3AZDeployment
-      - [ !Ref PrivateSubnet1ID, !Ref PrivateSubnet2ID, !Ref PrivateSubnet3ID ]
-      - !If
-        - 2AZDeployment
-        - [ !Ref PrivateSubnet1ID, !Ref PrivateSubnet2ID ]
-        - [ !Ref PrivateSubnet1ID ]
-      RemoteAccess:
-        Ec2SshKey: !Ref KeyPairName
+
 Outputs:
-  EKSNodeSecurityGroup:
-    Value: !If
-      - DisableManagedNodeGroup
-      - !Ref NodeSecurityGroup
-      - !If [ EnableManagedNodeGroup, !Ref NodeSG, "" ]
   NodeAutoScalingGroup:
-    Value: !If
-      - DisableManagedNodeGroup
-      - !Ref 'NodeGroup'
-      - !If [ EnableManagedNodeGroup, !Ref 'EKSNodegroup', "" ]
+    Value: !Ref 'NodeGroup'

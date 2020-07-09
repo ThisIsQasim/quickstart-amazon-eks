@@ -377,7 +377,6 @@ Resources:
           S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
       Parameters:
         TargetGroupARNs: ""
-        ProvisionClusterAutoScaler: !Ref ProvisionClusterAutoScaler
         HttpProxy: !Ref HttpProxy
         KeyPairName: !Ref 'KeyPairName'
         NodeAMIOS: !Ref NodeAMIOS
@@ -406,6 +405,38 @@ Resources:
         QSS3BucketRegion: !Ref QSS3BucketRegion
         CleanupSecurityGroupDependenciesLambdaArn: !GetAtt FunctionStack.Outputs.CleanupSecurityGroupDependenciesLambdaArn
         NodeSGFunctionArn: !GetAtt FunctionStack.Outputs.NodeSGFunctionArn
+  SpotNodeGroupStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub
+        - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/amazon-eks-spot-nodegroup.template.yaml'
+        - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+          S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+      Parameters:
+        TargetGroupARNs: ""
+        HttpProxy: !Ref HttpProxy
+        KeyPairName: !Ref 'KeyPairName'
+        NodeAMIOS: !Ref NodeAMIOS
+        PrivateSubnet1ID: !Ref PrivateSubnet1ID
+        PrivateSubnet2ID: !If [2AZDeployment, !Ref PrivateSubnet2ID, !Ref "AWS::NoValue" ]
+        PrivateSubnet3ID: !If [3AZDeployment, !Ref PrivateSubnet3ID, !Ref "AWS::NoValue" ]
+        VPCID: !Ref VPCID
+        NodeInstanceType: !Ref NodeInstanceType
+        NumberOfNodes: !Ref NumberOfNodes
+        MaxNumberOfNodes: !Ref MaxNumberOfNodes
+        NodeGroupName: !Ref NodeGroupName
+        NodeVolumeSize: !Ref NodeVolumeSize
+        CustomAmiId: !Ref CustomAmiId
+        EKSControlPlane: !GetAtt EKSControlPlane.Outputs.EKSName
+        NodeInstanceProfile: !GetAtt IamStack.Outputs.NodeInstanceProfile
+        NodeInstanceRoleName: !GetAtt IamStack.Outputs.NodeInstanceRoleName
+        NodeInstanceRoleArn: !GetAtt IamStack.Outputs.NodeInstanceRoleArn
+        NodeSecurityGroup: !GetAtt NodeGroupStack.Outputs.EKSNodeSecurityGroup
+        KubernetesVersion: !Ref KubernetesVersion
+        BootstrapArguments: !Ref BootstrapArguments
+        QSS3BucketName: !Ref QSS3BucketName
+        QSS3KeyPrefix: !Ref QSS3KeyPrefix
+        QSS3BucketRegion: !Ref QSS3BucketRegion
   BastionSShToNodes:
     Condition: EnableBastion
     Type: "AWS::EC2::SecurityGroupIngress"
