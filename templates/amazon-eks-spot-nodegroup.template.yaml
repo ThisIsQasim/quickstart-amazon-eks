@@ -837,7 +837,7 @@ Resources:
                 - - InstanceType: !Ref SpotNodeInstanceType1
         InstancesDistribution:
           OnDemandPercentageAboveBaseCapacity: 0
-          SpotInstancePools: 4
+          SpotAllocationStrategy: capacity-optimized
     CreationPolicy:
       ResourceSignal:
         Count: !Ref NumberOfNodes
@@ -952,7 +952,11 @@ Resources:
                   - BinaryPath
                 BINARY_BUCKET_REGION: us-west-2
             b-bootstrap:
-              command: !Sub /etc/eks/bootstrap.sh ${EKSControlPlane} ${BootstrapArguments}
+              command:
+                !Sub |
+                  /etc/eks/bootstrap.sh ${EKSControlPlane} ${BootstrapArguments} --kubelet-extra-args \
+                  '--node-labels=lifecycle=Ec2Spot \
+                  --register-with-taints=lifecycle=Ec2Spot:NoSchedule'
     Properties:
       LaunchTemplateData:
         IamInstanceProfile: 
@@ -1051,7 +1055,9 @@ Resources:
               BootStrap: !If
               - AmznOS
               - !Sub |
-                  /etc/eks/bootstrap.sh ${EKSControlPlane} ${BootstrapArguments} || signal /opt/aws/bin $1
+                  /etc/eks/bootstrap.sh ${EKSControlPlane} ${BootstrapArguments} --kubelet-extra-args \
+                  '--node-labels=lifecycle=Ec2Spot \
+                  --register-with-taints=lifecycle=Ec2Spot:NoSchedule' || signal /opt/aws/bin $1
               - !Sub |
                   if [ -e /etc/os-release ] && grep SLES /etc/os-release; then
                     zypper in -y python2-setuptools
