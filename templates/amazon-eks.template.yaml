@@ -192,6 +192,10 @@ Parameters:
     Type: String
     AllowedValues: [ "Enabled", "Disabled" ]
     Default: "Disabled"
+  ProvisionSpotNodeGroup:
+    Type: String
+    AllowedValues: [ "Enabled", "Disabled" ]
+    Default: "Disabled"
   IamOidcProvider:
     Type: String
     AllowedValues: [ "Enabled", "Disabled" ]
@@ -300,6 +304,7 @@ Conditions:
   CustomBastionRole: !Not [!Equals [!Ref 'BastionIAMRoleName', '']]
   AdditionalVars: !Not [!Equals [!Ref 'BastionVariables', '']]
   EnableClusterAutoScaler: !Equals [!Ref 'ProvisionClusterAutoScaler', 'Enabled']
+  EnableSpotNodeGroup: !Equals [!Ref 'ProvisionSpotNodeGroup', 'Enabled']
   EnableALBIngressController: !Equals [!Ref 'ProvisionALBIngressController', 'Enabled']
   EnableMonitoringPrometheusGrafana: !Equals [!Ref 'ProvisionMonitoringStack', 'Prometheus + Grafana']
   EnableEfs: !Equals [!Ref 'EfsStorageClass', 'Enabled']
@@ -407,6 +412,7 @@ Resources:
         NodeSGFunctionArn: !GetAtt FunctionStack.Outputs.NodeSGFunctionArn
   SpotNodeGroupStack:
     Type: "AWS::CloudFormation::Stack"
+    Condition: EnableSpotNodeGroup
     Properties:
       TemplateURL: !Sub
         - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/amazon-eks-spot-nodegroup.template.yaml'
@@ -510,6 +516,7 @@ Resources:
       DependsOn:
        - !Ref ControlPlaneSecurityGroupIngress
        - !If [EnableFargate, !Ref FargateNamespaces, !Ref 'AWS::NoValue']
+       - !If [EnableSpotNodeGroup, !Ref SpotNodeGroupStack, !Ref 'AWS::NoValue']
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub
@@ -519,6 +526,7 @@ Resources:
       Parameters:
         NodeInstanceRoleName: !GetAtt IamStack.Outputs.NodeInstanceRoleName
         NodeAutoScalingGroup: !GetAtt NodeGroupStack.Outputs.NodeAutoScalingGroup
+        SpotNodeAutoScalingGroup: !If [EnableSpotNodeGroup, !GetAtt SpotNodeGroupStack.Outputs.NodeAutoScalingGroup, ""]
         EksClusterName: !GetAtt EKSControlPlane.Outputs.EKSName
         KubernetesVersion: !Ref KubernetesVersion
   EfsStack:

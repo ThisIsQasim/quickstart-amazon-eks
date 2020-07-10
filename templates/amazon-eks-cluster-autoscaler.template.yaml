@@ -8,6 +8,9 @@ Parameters:
     Type: String
   NodeAutoScalingGroup:
     Type: String
+  SpotNodeAutoScalingGroup:
+    Default: ""
+    Type: String
   EksClusterName:
     Type: String
   KubernetesVersion:
@@ -20,6 +23,7 @@ Parameters:
 #       https://github.com/kubernetes/autoscaler/releases
 Conditions:
   is16: !Equals [ !Ref KubernetesVersion, "1.16" ]
+  SpotEnabled: !Not [ !Equals [ !Ref SpotNodeAutoScalingGroup, "" ]]
 Mappings:
   K8sVersionMap:
     "1.13":
@@ -50,7 +54,11 @@ Resources:
             Action:
               - autoscaling:SetDesiredCapacity
               - autoscaling:TerminateInstanceInAutoScalingGroup
-            Resource: !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${NodeAutoScalingGroup}"
+            Resource: !If
+              - SpotEnabled
+              - - !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${NodeAutoScalingGroup}"
+                - !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${SpotNodeAutoScalingGroup}"
+              - !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${NodeAutoScalingGroup}"
       Roles:
         - !Ref NodeInstanceRoleName
 
