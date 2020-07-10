@@ -76,7 +76,12 @@ Resources:
         autoDiscovery.clusterName: !Ref EksClusterName
         sslCertPath: /etc/ssl/certs/ca-bundle.crt
         extraArgs.balance-similar-node-groups: false
-        extraArgs.expander: random
+        extraArgs.expander: priority
+        expanderPriorities: |
+          10: 
+            - .*
+          50: 
+            - .*Spot.*
 Outputs:
   AutoScalerReleaseName:
     Value: !Ref AutoScalerHelmChart

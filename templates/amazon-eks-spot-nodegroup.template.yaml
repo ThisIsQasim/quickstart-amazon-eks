@@ -287,7 +287,7 @@ Parameters:
     Description: "[OPTIONAL] The maximum number of Amazon EKS node instances, if left blank will be set to the same value as NumberOfNodes"
     Type: String
   NodeGroupName:
-    Default: Default
+    Default: Spot
     Description: Name for EKS node group
     Type: String
   NodeVolumeSize:

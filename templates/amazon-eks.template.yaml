@@ -424,7 +424,6 @@ Resources:
         SpotNodeInstanceType1: !Ref NodeInstanceType
         NumberOfNodes: !Ref NumberOfNodes
         MaxNumberOfNodes: !Ref MaxNumberOfNodes
-        NodeGroupName: !Ref NodeGroupName
         NodeVolumeSize: !Ref NodeVolumeSize
         CustomAmiId: !Ref CustomAmiId
         EKSControlPlane: !GetAtt EKSControlPlane.Outputs.EKSName
