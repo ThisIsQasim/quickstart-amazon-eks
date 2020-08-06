@@ -592,6 +592,7 @@ Resources:
             - !Join [",", [ !Ref PrivateSubnet1ID, !Ref PrivateSubnet2ID ]]
             - !Ref PrivateSubnet1ID
         EKSClusterName: !If [GenerateClusterName, !Ref GenerateName, !Ref EKSClusterName]
+        HttpProxy: !Ref HttpProxy
   ClusterAutoScalerStack:
     Condition: EnableClusterAutoScaler
     Metadata:
@@ -857,3 +858,5 @@ Outputs:
     Value: !GetAtt NodeGroupStack.Outputs.NodeAutoScalingGroup
   OIDCIssuerURL:
     Value : !GetAtt EKSControlPlane.Outputs.OIDCIssuerURL
+  NodeSGFunctionArn:
+    Value : !GetAtt FunctionStack.Outputs.NodeSGFunctionArn
